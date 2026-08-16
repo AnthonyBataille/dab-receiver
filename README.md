@@ -43,4 +43,12 @@ Run the Release executable:
 .\build\Release\dab_receiver.exe
 ```
 
+## Test
+
+Run the Debug test suite:
+
+```powershell
+ctest --preset test-debug
+```
+
 Licensing is deferred; no license is currently claimed.
