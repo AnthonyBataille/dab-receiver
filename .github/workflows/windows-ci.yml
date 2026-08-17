@@ -1,0 +1,25 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Configure
+        shell: pwsh
+        run: cmake --preset vs2022-x64
+      - name: Build Debug
+        shell: pwsh
+        run: cmake --build --preset debug --parallel
+      - name: Run tests
+        shell: pwsh
+        run: ctest --preset test-debug --output-on-failure
