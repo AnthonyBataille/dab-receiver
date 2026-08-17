@@ -51,6 +51,10 @@ Run the Debug test suite:
 ctest --preset test-debug
 ```
 
+## Continuous integration
+
+GitHub Actions runs the Windows Debug build and CTest on pushes to `main` and pull requests.
+
 ## Formatting
 
 Format all tracked C++ source and header files:
