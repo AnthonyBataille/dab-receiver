@@ -51,4 +51,20 @@ Run the Debug test suite:
 ctest --preset test-debug
 ```
 
+## Formatting
+
+Format all tracked C++ source and header files:
+
+```powershell
+git ls-files -- '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx' |
+    ForEach-Object { clang-format -i --style=file $_ }
+```
+
+Check formatting without modifying files:
+
+```powershell
+git ls-files -- '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx' |
+    ForEach-Object { clang-format --dry-run --Werror --style=file $_ }
+```
+
 Licensing is deferred; no license is currently claimed.
