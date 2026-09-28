@@ -17,12 +17,24 @@
 - `dab_receiver.exe` printed `DAB Receiver 0.1.0`.
 - Catch2 was obtained and built by CMake FetchContent in the fresh build directory.
 
-## SDR hardware and verified capture
+## SDR hardware and verified reference capture
 
-- RTL2832U with R820T tuner.
-- Verified 11D capture at 222.064 MHz.
-- 2.048 MS/s, unsigned 8-bit interleaved IQ.
-- Automatic gain.
-- 20,480,000 complex samples and 40,960,000 bytes.
+- Device: RTL2832U with R820T tuner (RTL-SDR Blog V3).
+- DAB block: 11D, center frequency 222.064 MHz.
+- Sample rate: 2,048,000 complex samples/s.
+- Format: raw interleaved unsigned 8-bit I, Q; one byte per component.
+- Gain: automatic (no manual gain specified).
+- Length: 20,480,000 complex samples = 10 seconds.
+- Expected and observed size: 40,960,000 bytes.
+- Reference recording: `dab_11d_10s_u8.iq` (stored outside Git).
+
+The capture script is `.\experiments\capture-dab-11d.ps1`. Run it
+from PowerShell, supplying the path to the installed executable and a new
+output filename:
+
+```powershell
+.\experiments\capture-dab-11d.ps1 -RtlSdrExe "C:\path\to\rtl_sdr.exe" `
+    -OutputFile "dab_11d_10s_u8.iq"
+```
 
 The `[R82XX] PLL not locked!` initialization warning was observed and retained for later investigation.
