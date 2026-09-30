@@ -6,10 +6,16 @@ include(CTest)
 
 add_executable(dab_receiver src/main.cpp)
 
+add_library(dab_iq_reader src/iq_file_reader.cpp)
+target_include_directories(dab_iq_reader PUBLIC src)
+target_compile_features(dab_iq_reader PUBLIC cxx_std_20)
+set_target_properties(dab_iq_reader PROPERTIES CXX_EXTENSIONS OFF)
+
 target_compile_features(dab_receiver PRIVATE cxx_std_20)
 set_target_properties(dab_receiver PROPERTIES CXX_EXTENSIONS OFF)
 
 if(MSVC)
+    target_compile_options(dab_iq_reader PRIVATE /W4 /WX /permissive- /utf-8 /Zc:__cplusplus)
     target_compile_options(
         dab_receiver
         PRIVATE
@@ -51,4 +57,11 @@ if(BUILD_TESTING)
     target_link_libraries(dab_receiver_smoke_test PRIVATE Catch2::Catch2WithMain)
 
     add_test(NAME smoke_test COMMAND dab_receiver_smoke_test)
+
+    add_executable(dab_iq_reader_test tests/iq_file_reader_test.cpp)
+    target_link_libraries(dab_iq_reader_test PRIVATE dab_iq_reader Catch2::Catch2WithMain)
+    if(MSVC)
+        target_compile_options(dab_iq_reader_test PRIVATE /W4 /WX /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME iq_reader_test COMMAND dab_iq_reader_test)
 endif()
