@@ -16,5 +16,4 @@ locally and is not tracked by Git.
 `IqFileReader` returns at most its configured capacity in complex samples per
 call. An empty block means clean EOF. Open/read errors and a truncated final
 I/Q pair throw exceptions. The optional raw read byte count allows tests to
-split a pair between reads. The conversion and pair assembly functions remain
-`TODO(user)` exercises; their tests are expected to fail until implemented.
+split a pair between reads.
