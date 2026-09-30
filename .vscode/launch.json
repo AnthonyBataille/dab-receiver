@@ -9,6 +9,15 @@
       "args": [],
       "cwd": "${workspaceFolder}",
       "stopAtEntry": false
+    },
+    {
+      "name": "Debug IQ summary test",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}\\build\\Debug\\dab_iq_summary_test.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "stopAtEntry": false
     }
   ]
 }
