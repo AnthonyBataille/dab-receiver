@@ -18,6 +18,8 @@ New-Item -ItemType Directory -Force .\out | Out-Null
     --output-dir .\out
 ```
 
+Before using Debug DAB receiver (diagnostics) in VS Code, create the out directory `(New-Item -ItemType Directory -Force .\out)`. On each later run, enter new names for both CSV files when prompted, such as `.\out\power-02.csv` and `.\out\spectrum-02.csv`. The exporter will not overwrite existing files. Pass those same names to the plotting script.
+
 Either output option may be supplied alone, in either order, once each. The
 sample rate must be a positive integer in complex samples per second. The plot
 script uses the existing NumPy/Matplotlib environment and writes `power_time.png`
