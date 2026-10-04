@@ -11,6 +11,9 @@ The project is currently in Phase 0. The intended high-level receiver chain is:
 
 Large IQ recordings are not stored in Git.
 
+Offline IQ summaries and optional power/spectrum CSV exports are documented in
+[Phase 4.4 diagnostic commands and conventions](docs/iq-diagnostics.md).
+
 ## Build and run
 
 Configure with Visual Studio 2022 for x64:
