@@ -1,5 +1,8 @@
 #include "iq_diagnostics.hpp"
 
+#define NOMINMAX
+#include <Windows.h>
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
@@ -122,6 +125,81 @@ TEST_CASE("empty recording exports only a power header", "[diagnostics]") {
     CHECK(read_text(fixture.power) == "window_start_seconds,mean_linear_power,sample_count\n");
 }
 
+TEST_CASE("export creates missing parent directories", "[diagnostics]") {
+    const Fixture fixture(std::vector<unsigned char>(4096, 128));
+    const auto power = fixture.directory / "new" / "nested" / "power.csv";
+    const auto spectrum = fixture.directory / "new" / "nested" / "spectrum.csv";
+    std::ostringstream summary;
+    const auto result = dab::export_iq_diagnostics(fixture.input, 2048, summary, power, spectrum);
+    CHECK(result.complex_samples == 2048);
+    CHECK(rows(read_text(power)).size() == 4);
+    CHECK(rows(read_text(spectrum)).size() == 2048);
+}
+
+TEST_CASE("a second export replaces both completed CSVs", "[diagnostics]") {
+    const Fixture fixture(std::vector<unsigned char>(4096, 128));
+    std::ostringstream summary;
+    dab::export_iq_diagnostics(fixture.input, 2048, summary, fixture.power, fixture.spectrum);
+    const auto first_power = read_text(fixture.power);
+    const auto first_spectrum = read_text(fixture.spectrum);
+
+    // All-zero bytes convert to -1-j, unlike the first recording's zero signal.
+    std::ofstream replacement(fixture.input, std::ios::binary | std::ios::trunc);
+    for (int byte = 0; byte < 4096; ++byte) {
+        replacement.put(0);
+    }
+    replacement.close();
+    REQUIRE(replacement.good());
+    dab::export_iq_diagnostics(fixture.input, 2048, summary, fixture.power, fixture.spectrum);
+    CHECK(read_text(fixture.power) != first_power);
+    CHECK(read_text(fixture.spectrum) != first_spectrum);
+    CHECK(rows(read_text(fixture.power))[0][1] == 2);
+    CHECK(std::distance(std::filesystem::directory_iterator(fixture.directory),
+                        std::filesystem::directory_iterator{}) == 3);
+}
+
+TEST_CASE("failed processing preserves previous CSV bytes", "[diagnostics][error]") {
+    const Fixture fixture(std::vector<unsigned char>(4096, 128));
+    std::ostringstream summary;
+    dab::export_iq_diagnostics(fixture.input, 2048, summary, fixture.power, fixture.spectrum);
+    const auto old_power = read_text(fixture.power);
+    const auto old_spectrum = read_text(fixture.spectrum);
+    std::filesystem::resize_file(fixture.input, 4097);
+    CHECK_THROWS_WITH(
+        dab::export_iq_diagnostics(fixture.input, 2048, summary, fixture.power, fixture.spectrum),
+        "Unmatched I byte at end of IQ input file");
+    CHECK(read_text(fixture.power) == old_power);
+    CHECK(read_text(fixture.spectrum) == old_spectrum);
+    CHECK(std::distance(std::filesystem::directory_iterator(fixture.directory),
+                        std::filesystem::directory_iterator{}) == 3);
+}
+
+TEST_CASE("failed second publication restores the first CSV", "[diagnostics][error]") {
+    const Fixture fixture(std::vector<unsigned char>(4096, 128));
+    std::ostringstream summary;
+    dab::export_iq_diagnostics(fixture.input, 2048, summary, fixture.power, fixture.spectrum);
+    const auto old_power = read_text(fixture.power);
+    const auto old_spectrum = read_text(fixture.spectrum);
+
+    // Deny delete sharing so Windows cannot move the second destination aside.
+    {
+        std::ofstream changed(fixture.input, std::ios::binary | std::ios::trunc);
+        const std::vector<char> bytes(4096, 0);
+        changed.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        REQUIRE(changed.good());
+    }
+    const HANDLE locked = CreateFileW(fixture.spectrum.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                                      nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    REQUIRE(locked != INVALID_HANDLE_VALUE);
+    CHECK_THROWS(
+        dab::export_iq_diagnostics(fixture.input, 2048, summary, fixture.power, fixture.spectrum));
+    CloseHandle(locked);
+    CHECK(read_text(fixture.power) == old_power);
+    CHECK(read_text(fixture.spectrum) == old_spectrum);
+    CHECK(std::distance(std::filesystem::directory_iterator(fixture.directory),
+                        std::filesystem::directory_iterator{}) == 3);
+}
+
 TEST_CASE("rectangular DFT has the correct sign shift and normalized tone power", "[diagnostics]") {
     for (const int sign : {1, -1, 0}) {
         // Exact four-sample complex sinusoid: +/- Fs/4, amplitude 0.5.
@@ -196,11 +274,11 @@ TEST_CASE("failed processing publishes no CSV and cleans staging", "[diagnostics
     SECTION("invalid sample rate") {
         CHECK_THROWS(dab::export_iq_diagnostics(fixture.input, 0, summary, fixture.power, {}));
     }
-    SECTION("cannot open second output") {
+    SECTION("second output path is a directory") {
         CHECK_THROWS(dab::export_iq_diagnostics(fixture.input, 1000, summary, fixture.power,
-                                                fixture.directory / "missing" / "spectrum.csv"));
+                                                fixture.directory));
     }
-    SECTION("publication collision rolls back first published CSV") {
+    SECTION("the two CSVs cannot share a destination") {
         std::filesystem::resize_file(fixture.input, 4096);
         CHECK_THROWS(
             dab::export_iq_diagnostics(fixture.input, 1000, summary, fixture.power, fixture.power));
