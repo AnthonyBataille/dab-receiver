@@ -1,5 +1,8 @@
 #include "iq_diagnostics.hpp"
 
+#define NOMINMAX
+#include <Windows.h>
+
 #include <chrono>
 #include <cmath>
 #include <fstream>
@@ -19,27 +22,40 @@ void check_output(const std::ostream& output) {
     }
 }
 
-// A uniquely reserved sibling directory keeps staging on the destination volume.
-// Never truncate a pre-existing destination (including the input recording).
+// Stage beside the destination so publication stays on the same volume.
 class PendingCsv {
   public:
-    explicit PendingCsv(const std::filesystem::path& destination) : destination_(destination) {
-        if (destination.empty() || std::filesystem::exists(destination)) {
-            throw std::runtime_error("CSV destination must be a new file: " + destination.string());
+    explicit PendingCsv(const std::filesystem::path& destination) {
+        if (destination.empty()) {
+            throw std::invalid_argument("CSV destination path must not be empty");
         }
+        destination_ = std::filesystem::absolute(destination).lexically_normal();
+        std::filesystem::create_directories(destination_.parent_path());
+        if (std::filesystem::is_directory(destination_)) {
+            throw std::runtime_error("CSV destination is a directory: " + destination_.string());
+        }
+
         const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
         for (unsigned attempt = 0; attempt < 100; ++attempt) {
-            directory_ = destination;
-            directory_ += ".tmp-" + std::to_string(stamp) + "-" + std::to_string(attempt);
-            if (std::filesystem::create_directory(directory_)) {
+            temporary_ = destination_;
+            temporary_ += ".tmp-" + std::to_string(stamp) + "-" + std::to_string(attempt);
+            const HANDLE handle = CreateFileW(temporary_.c_str(), GENERIC_WRITE, 0, nullptr,
+                                              CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (handle != INVALID_HANDLE_VALUE) {
+                CloseHandle(handle);
                 break;
             }
-            directory_.clear();
+            if (GetLastError() != ERROR_FILE_EXISTS && GetLastError() != ERROR_ALREADY_EXISTS) {
+                throw std::runtime_error("Cannot create temporary CSV for: " +
+                                         destination_.string());
+            }
+            temporary_.clear();
         }
-        if (directory_.empty()) {
+        if (temporary_.empty()) {
             throw std::runtime_error("Cannot reserve temporary CSV for: " + destination.string());
         }
-        temporary_ = directory_ / "output.csv";
+        backup_ = temporary_;
+        backup_ += ".bak";
         stream_.open(temporary_);
         if (!stream_) {
             cleanup();
@@ -64,7 +80,13 @@ class PendingCsv {
 
     void publish() {
         if (std::filesystem::exists(destination_)) {
-            throw std::runtime_error("CSV destination already exists: " + destination_.string());
+            if (!std::filesystem::is_regular_file(destination_)) {
+                throw std::runtime_error("CSV destination is not a file: " + destination_.string());
+            }
+            // Windows rename cannot replace an existing file. Keep its old bytes
+            // until every requested CSV has been published successfully.
+            std::filesystem::rename(destination_, backup_);
+            backed_up_ = true;
         }
         std::filesystem::rename(temporary_, destination_);
         published_ = true;
@@ -72,25 +94,32 @@ class PendingCsv {
 
     void commit() {
         committed_ = true;
+        std::error_code ignored;
+        if (backed_up_) {
+            std::filesystem::remove(backup_, ignored);
+        }
     }
 
   private:
     void cleanup() noexcept {
         stream_.close();
         std::error_code ignored;
-        if (published_ && !committed_) {
-            std::filesystem::remove(destination_, ignored);
+        if (!committed_) {
+            if (published_) {
+                std::filesystem::remove(destination_, ignored);
+            }
+            if (backed_up_) {
+                std::filesystem::rename(backup_, destination_, ignored);
+            }
         }
         if (!temporary_.empty()) {
             std::filesystem::remove(temporary_, ignored);
         }
-        if (!directory_.empty()) {
-            std::filesystem::remove(directory_, ignored);
-        }
     }
 
-    std::filesystem::path destination_, directory_, temporary_;
+    std::filesystem::path destination_, temporary_, backup_;
     std::ofstream stream_;
+    bool backed_up_ = false;
     bool published_ = false;
     bool committed_ = false;
 };
@@ -179,6 +208,19 @@ IqSummary export_iq_diagnostics(const std::filesystem::path& input, std::uint64_
                                 const std::optional<std::filesystem::path>& power_path,
                                 const std::optional<std::filesystem::path>& spectrum_path,
                                 std::size_t block_capacity) {
+    for (const auto& path : {power_path, spectrum_path}) {
+        if (path && std::filesystem::exists(input) && std::filesystem::exists(*path) &&
+            std::filesystem::equivalent(input, *path)) {
+            throw std::invalid_argument("CSV destination cannot be the IQ input file");
+        }
+    }
+    if (power_path && spectrum_path &&
+        (std::filesystem::absolute(*power_path).lexically_normal() ==
+             std::filesystem::absolute(*spectrum_path).lexically_normal() ||
+         (std::filesystem::exists(*power_path) && std::filesystem::exists(*spectrum_path) &&
+          std::filesystem::equivalent(*power_path, *spectrum_path)))) {
+        throw std::invalid_argument("Power and spectrum CSV destinations must differ");
+    }
     std::unique_ptr<PendingCsv> power, spectrum;
     if (power_path) {
         power = std::make_unique<PendingCsv>(*power_path);

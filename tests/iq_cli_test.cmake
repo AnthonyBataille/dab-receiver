@@ -35,8 +35,11 @@ check_exit(1 "${TEST_DIR}/missing.iq" 1000)
 check_exit(1 "${TEST_DIR}/malformed.iq" 1000 --power-csv "${TEST_DIR}/failed.csv")
 # A requested spectrum needs at least 2048 complex samples.
 check_exit(1 "${TEST_DIR}/empty.iq" 1000 --spectrum-csv "${TEST_DIR}/failed.csv")
-# The output directory must already exist.
-check_exit(1 "${TEST_DIR}/empty.iq" 1000 --power-csv "${TEST_DIR}/missing/output.csv")
+# The exporter creates a missing output directory.
+check_exit(0 "${TEST_DIR}/empty.iq" 1000 --power-csv "${TEST_DIR}/missing/output.csv")
+if(NOT EXISTS "${TEST_DIR}/missing/output.csv")
+    message(FATAL_ERROR "Expected CSV in the newly created output directory")
+endif()
 # Failed exports must not publish a final CSV.
 if(EXISTS "${TEST_DIR}/failed.csv")
     message(FATAL_ERROR "A failed export published a CSV")

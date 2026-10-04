@@ -35,7 +35,7 @@ class IqDiagnostics {
     std::size_t spectrum_count_ = 0;
 };
 
-// Destinations must not exist. Temporary output is removed on failure.
+// Destinations may exist. Old CSVs are preserved if processing fails.
 IqSummary export_iq_diagnostics(const std::filesystem::path& input, std::uint64_t sample_rate,
                                 std::ostream& summary,
                                 const std::optional<std::filesystem::path>& power_path,

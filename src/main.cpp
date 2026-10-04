@@ -15,7 +15,7 @@ void print_usage(const char* program) {
               << "  sample-rate: positive complex samples per second (integer)\n"
               << "  --power-csv: 512-sample mean linear power versus window start time\n"
               << "  --spectrum-csv: shifted spectrum of the first 2048 complex samples\n"
-              << "  CSV paths must be new files in existing directories.\n";
+              << "  CSV parent directories are created; existing CSVs are replaced on success.\n";
 }
 
 bool parse_sample_rate(std::string_view text, std::uint64_t& sample_rate) {
