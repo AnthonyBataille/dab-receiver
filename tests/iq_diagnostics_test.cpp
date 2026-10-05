@@ -136,66 +136,52 @@ TEST_CASE("export creates missing parent directories", "[diagnostics]") {
     CHECK(rows(read_text(spectrum)).size() == 2048);
 }
 
-TEST_CASE("a second export replaces both completed CSVs", "[diagnostics]") {
-    const Fixture fixture(std::vector<unsigned char>(4096, 128));
-    std::ostringstream summary;
-    dab::export_iq_diagnostics(fixture.input, 2048, summary, fixture.power, fixture.spectrum);
-    const auto first_power = read_text(fixture.power);
-    const auto first_spectrum = read_text(fixture.spectrum);
-
-    // All-zero bytes convert to -1-j, unlike the first recording's zero signal.
-    std::ofstream replacement(fixture.input, std::ios::binary | std::ios::trunc);
-    for (int byte = 0; byte < 4096; ++byte) {
-        replacement.put(0);
-    }
-    replacement.close();
-    REQUIRE(replacement.good());
-    dab::export_iq_diagnostics(fixture.input, 2048, summary, fixture.power, fixture.spectrum);
-    CHECK(read_text(fixture.power) != first_power);
-    CHECK(read_text(fixture.spectrum) != first_spectrum);
-    CHECK(rows(read_text(fixture.power))[0][1] == 2);
-    CHECK(std::distance(std::filesystem::directory_iterator(fixture.directory),
-                        std::filesystem::directory_iterator{}) == 3);
-}
-
-TEST_CASE("failed processing preserves previous CSV bytes", "[diagnostics][error]") {
+TEST_CASE("a second export replaces both CSVs or preserves them on failure",
+          "[diagnostics][error]") {
     const Fixture fixture(std::vector<unsigned char>(4096, 128));
     std::ostringstream summary;
     dab::export_iq_diagnostics(fixture.input, 2048, summary, fixture.power, fixture.spectrum);
     const auto old_power = read_text(fixture.power);
     const auto old_spectrum = read_text(fixture.spectrum);
-    std::filesystem::resize_file(fixture.input, 4097);
-    CHECK_THROWS_WITH(
-        dab::export_iq_diagnostics(fixture.input, 2048, summary, fixture.power, fixture.spectrum),
-        "Unmatched I byte at end of IQ input file");
-    CHECK(read_text(fixture.power) == old_power);
-    CHECK(read_text(fixture.spectrum) == old_spectrum);
-    CHECK(std::distance(std::filesystem::directory_iterator(fixture.directory),
-                        std::filesystem::directory_iterator{}) == 3);
-}
-
-TEST_CASE("failed second publication restores the first CSV", "[diagnostics][error]") {
-    const Fixture fixture(std::vector<unsigned char>(4096, 128));
-    std::ostringstream summary;
-    dab::export_iq_diagnostics(fixture.input, 2048, summary, fixture.power, fixture.spectrum);
-    const auto old_power = read_text(fixture.power);
-    const auto old_spectrum = read_text(fixture.spectrum);
-
-    // Deny delete sharing so Windows cannot move the second destination aside.
-    {
-        std::ofstream changed(fixture.input, std::ios::binary | std::ios::trunc);
-        const std::vector<char> bytes(4096, 0);
-        changed.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-        REQUIRE(changed.good());
+    SECTION("successful replacement") {
+        // All-zero bytes convert to -1-j, unlike the first recording's zero signal.
+        std::ofstream replacement(fixture.input, std::ios::binary | std::ios::trunc);
+        for (int byte = 0; byte < 4096; ++byte) {
+            replacement.put(0);
+        }
+        replacement.close();
+        REQUIRE(replacement.good());
+        dab::export_iq_diagnostics(fixture.input, 2048, summary, fixture.power, fixture.spectrum);
+        CHECK(read_text(fixture.power) != old_power);
+        CHECK(read_text(fixture.spectrum) != old_spectrum);
+        CHECK(rows(read_text(fixture.power))[0][1] == 2);
     }
-    const HANDLE locked = CreateFileW(fixture.spectrum.c_str(), GENERIC_READ, FILE_SHARE_READ,
-                                      nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    REQUIRE(locked != INVALID_HANDLE_VALUE);
-    CHECK_THROWS(
-        dab::export_iq_diagnostics(fixture.input, 2048, summary, fixture.power, fixture.spectrum));
-    CloseHandle(locked);
-    CHECK(read_text(fixture.power) == old_power);
-    CHECK(read_text(fixture.spectrum) == old_spectrum);
+    SECTION("failed replacement") {
+        SECTION("processing fails before publication") {
+            std::filesystem::resize_file(fixture.input, 4097);
+            CHECK_THROWS_WITH(dab::export_iq_diagnostics(fixture.input, 2048, summary,
+                                                         fixture.power, fixture.spectrum),
+                              "Unmatched I byte at end of IQ input file");
+        }
+        SECTION("second publication fails after the first") {
+            // Deny delete sharing so Windows cannot move the second destination aside.
+            {
+                std::ofstream changed(fixture.input, std::ios::binary | std::ios::trunc);
+                const std::vector<char> bytes(4096, 0);
+                changed.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+                REQUIRE(changed.good());
+            }
+            const HANDLE locked =
+                CreateFileW(fixture.spectrum.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            REQUIRE(locked != INVALID_HANDLE_VALUE);
+            CHECK_THROWS(dab::export_iq_diagnostics(fixture.input, 2048, summary, fixture.power,
+                                                    fixture.spectrum));
+            CloseHandle(locked);
+        }
+        CHECK(read_text(fixture.power) == old_power);
+        CHECK(read_text(fixture.spectrum) == old_spectrum);
+    }
     CHECK(std::distance(std::filesystem::directory_iterator(fixture.directory),
                         std::filesystem::directory_iterator{}) == 3);
 }

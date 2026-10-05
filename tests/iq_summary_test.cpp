@@ -42,24 +42,25 @@ class InputFixture {
 
 } // namespace
 
-TEST_CASE("IQ summary counts complex samples and computes duration, 6 samples", "[iq][exercise]") {
-    const InputFixture input({0, 128, 255, 0, 128, 255});
-    std::ostringstream output;
-    const auto summary = dab::summarize_iq_file(input.path(), 2, output);
-    CHECK(summary.complex_samples == 3);
-    CHECK(summary.duration_seconds == 1.5);
-    CHECK(output.str().find("Complex samples: 3") != std::string::npos);
-    CHECK(output.str().find("Duration: 1.500") != std::string::npos);
-}
-
-TEST_CASE("IQ summary counts complex samples and computes duration, 1 sample", "[iq][exercise]") {
-    const InputFixture input({0, 128});
-    std::ostringstream output;
-    const auto summary = dab::summarize_iq_file(input.path(), 4, output);
-    CHECK(summary.complex_samples == 1);
-    CHECK(summary.duration_seconds == 0.25);
-    CHECK(output.str().find("Complex samples: 1") != std::string::npos);
-    CHECK(output.str().find("Duration: 0.250") != std::string::npos);
+TEST_CASE("IQ summary counts short recordings and formats their durations", "[iq][exercise]") {
+    SECTION("three samples at two samples per second") {
+        const InputFixture input({0, 128, 255, 0, 128, 255});
+        std::ostringstream output;
+        const auto summary = dab::summarize_iq_file(input.path(), 2, output);
+        CHECK(summary.complex_samples == 3);
+        CHECK(summary.duration_seconds == 1.5);
+        CHECK(output.str().find("Complex samples: 3") != std::string::npos);
+        CHECK(output.str().find("Duration: 1.500") != std::string::npos);
+    }
+    SECTION("one sample at four samples per second") {
+        const InputFixture input({0, 128});
+        std::ostringstream output;
+        const auto summary = dab::summarize_iq_file(input.path(), 4, output);
+        CHECK(summary.complex_samples == 1);
+        CHECK(summary.duration_seconds == 0.25);
+        CHECK(output.str().find("Complex samples: 1") != std::string::npos);
+        CHECK(output.str().find("Duration: 0.250") != std::string::npos);
+    }
 }
 
 TEST_CASE("IQ summary counts complex samples and computes duration of a reference-sized file",
