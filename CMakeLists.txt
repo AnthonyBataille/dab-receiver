@@ -11,7 +11,8 @@ target_include_directories(dab_iq_reader PUBLIC src)
 target_compile_features(dab_iq_reader PUBLIC cxx_std_20)
 set_target_properties(dab_iq_reader PROPERTIES CXX_EXTENSIONS OFF)
 
-add_library(dab_iq_summary src/iq_summary.cpp src/iq_diagnostics.cpp)
+add_library(dab_iq_summary src/iq_diagnostics.cpp
+    src/offline_iq_runner.cpp)
 target_include_directories(dab_iq_summary PUBLIC src)
 target_link_libraries(dab_iq_summary PUBLIC dab_iq_reader)
 target_compile_features(dab_iq_summary PUBLIC cxx_std_20)
