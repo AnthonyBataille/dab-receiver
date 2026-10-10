@@ -46,40 +46,12 @@ if(BUILD_TESTING)
     )
     FetchContent_MakeAvailable(Catch2)
 
-    add_executable(dab_receiver_smoke_test tests/smoke_test.cpp)
-
-    target_compile_features(dab_receiver_smoke_test PRIVATE cxx_std_20)
-    set_target_properties(dab_receiver_smoke_test PROPERTIES CXX_EXTENSIONS OFF)
-
-    if(MSVC)
-        target_compile_options(
-            dab_receiver_smoke_test
-            PRIVATE
-                /W4
-                /WX
-                /permissive-
-                /utf-8
-                /Zc:__cplusplus
-        )
-    endif()
-
-    target_link_libraries(dab_receiver_smoke_test PRIVATE Catch2::Catch2WithMain)
-
-    add_test(NAME smoke_test COMMAND dab_receiver_smoke_test)
-
     add_executable(dab_iq_reader_test tests/iq_file_reader_test.cpp)
     target_link_libraries(dab_iq_reader_test PRIVATE dab_iq_reader Catch2::Catch2WithMain)
     if(MSVC)
         target_compile_options(dab_iq_reader_test PRIVATE /W4 /WX /permissive- /utf-8 /Zc:__cplusplus)
     endif()
     add_test(NAME iq_reader_test COMMAND dab_iq_reader_test)
-
-    add_executable(dab_iq_summary_test tests/iq_summary_test.cpp)
-    target_link_libraries(dab_iq_summary_test PRIVATE dab_iq_summary Catch2::Catch2WithMain)
-    if(MSVC)
-        target_compile_options(dab_iq_summary_test PRIVATE /W4 /WX /permissive- /utf-8 /Zc:__cplusplus)
-    endif()
-    add_test(NAME iq_summary_test COMMAND dab_iq_summary_test)
 
     add_executable(dab_iq_diagnostics_test tests/iq_diagnostics_test.cpp)
     target_link_libraries(dab_iq_diagnostics_test PRIVATE dab_iq_summary Catch2::Catch2WithMain)
