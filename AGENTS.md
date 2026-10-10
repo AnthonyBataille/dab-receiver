@@ -1,6 +1,6 @@
 # DABReceiver Repository Instructions
 
-This is a Windows C++20 DAB+ receiver project for RTL-SDR. Current work is Phase 0. Keep the GUI separate from the backend/DSP pipeline.
+This is a Windows C++20 DAB+ receiver project for RTL-SDR. Keep the GUI separate from the backend/DSP pipeline.
 
 Before starting work, read `README.md`, this `AGENTS.md`, and the relevant files under `docs/`.
 
