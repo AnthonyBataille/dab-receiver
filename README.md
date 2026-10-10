@@ -2,7 +2,7 @@
 
 DABReceiver is a Windows application intended to receive and decode DAB+ broadcasts with an RTL-SDR Blog V3-compatible device.
 
-The project is currently in Phase 0. The intended high-level receiver chain is:
+The intended high-level receiver chain is:
 
 `IQ input -> DAB ensemble synchronization -> service discovery -> DAB+ audio service selection -> playback`
 
@@ -36,14 +36,28 @@ cmake --build --preset release
 
 Run the Debug executable:
 
+Display only file summary:
 ```powershell
-.\build\Debug\dab_receiver.exe
+.\build\Debug\dab_receiver.exe .\dab_11d_10s_u8.iq 2048000
+```
+
+Display file summary and export diagnostic CSVs.
+```powershell
+.\build\Debug\dab_receiver.exe .\dab_11d_10s_u8.iq 2048000 `
+    --power-csv .\out\power.csv --spectrum-csv .\out\spectrum.csv
 ```
 
 Run the Release executable:
 
+Display only file summary:
 ```powershell
-.\build\Release\dab_receiver.exe
+.\build\Release\dab_receiver.exe .\dab_11d_10s_u8.iq 2048000
+```
+
+Display file summary and export diagnostic CSVs.
+```powershell
+.\build\Release\dab_receiver.exe .\dab_11d_10s_u8.iq 2048000 `
+    --power-csv .\out\power.csv --spectrum-csv .\out\spectrum.csv
 ```
 
 ## Test
