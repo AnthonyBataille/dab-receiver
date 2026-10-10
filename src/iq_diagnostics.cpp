@@ -5,16 +5,16 @@
 
 #include <chrono>
 #include <cmath>
-#include <fstream>
 #include <iomanip>
+#include <initializer_list>
 #include <locale>
-#include <memory>
 #include <numbers>
 #include <stdexcept>
 #include <string>
+#include <system_error>
+#include <iostream>
 
 namespace dab {
-namespace {
 
 void check_output(const std::ostream& output) {
     if (!output) {
@@ -22,113 +22,98 @@ void check_output(const std::ostream& output) {
     }
 }
 
-// Stage beside the destination so publication stays on the same volume.
-class PendingCsv {
-  public:
-    explicit PendingCsv(const std::filesystem::path& destination) {
-        if (destination.empty()) {
-            throw std::invalid_argument("CSV destination path must not be empty");
-        }
-        destination_ = std::filesystem::absolute(destination).lexically_normal();
-        std::filesystem::create_directories(destination_.parent_path());
-        if (std::filesystem::is_directory(destination_)) {
-            throw std::runtime_error("CSV destination is a directory: " + destination_.string());
-        }
-
-        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        for (unsigned attempt = 0; attempt < 100; ++attempt) {
-            temporary_ = destination_;
-            temporary_ += ".tmp-" + std::to_string(stamp) + "-" + std::to_string(attempt);
-            const HANDLE handle = CreateFileW(temporary_.c_str(), GENERIC_WRITE, 0, nullptr,
-                                              CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
-            if (handle != INVALID_HANDLE_VALUE) {
-                CloseHandle(handle);
-                break;
-            }
-            if (GetLastError() != ERROR_FILE_EXISTS && GetLastError() != ERROR_ALREADY_EXISTS) {
-                throw std::runtime_error("Cannot create temporary CSV for: " +
-                                         destination_.string());
-            }
-            temporary_.clear();
-        }
-        if (temporary_.empty()) {
-            throw std::runtime_error("Cannot reserve temporary CSV for: " + destination.string());
-        }
-        backup_ = temporary_;
-        backup_ += ".bak";
-        stream_.open(temporary_);
-        if (!stream_) {
-            cleanup();
-            throw std::runtime_error("Cannot open temporary CSV for: " + destination.string());
-        }
+PendingCsv::PendingCsv(const std::filesystem::path& destination) {
+    if (destination.empty()) {
+        throw std::invalid_argument("CSV destination path must not be empty");
+    }
+    destination_ = std::filesystem::absolute(destination).lexically_normal();
+    std::filesystem::create_directories(destination_.parent_path());
+    if (std::filesystem::is_directory(destination_)) {
+        throw std::runtime_error("CSV destination is a directory: " + destination_.string());
     }
 
-    ~PendingCsv() {
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    for (unsigned attempt = 0; attempt < 100; ++attempt) {
+        temporary_ = destination_;
+        temporary_ += ".tmp-" + std::to_string(stamp) + "-" + std::to_string(attempt);
+        const HANDLE handle = CreateFileW(temporary_.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                                          FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (handle != INVALID_HANDLE_VALUE) {
+            CloseHandle(handle);
+            break;
+        }
+        if (GetLastError() != ERROR_FILE_EXISTS && GetLastError() != ERROR_ALREADY_EXISTS) {
+            throw std::runtime_error("Cannot create temporary CSV for: " + destination_.string());
+        }
+        temporary_.clear();
+    }
+    if (temporary_.empty()) {
+        throw std::runtime_error("Cannot reserve temporary CSV for: " + destination.string());
+    }
+    backup_ = temporary_;
+    backup_ += ".bak";
+    stream_.open(temporary_);
+    if (!stream_) {
         cleanup();
+        throw std::runtime_error("Cannot open temporary CSV for: " + destination.string());
     }
+}
 
-    std::ostream& stream() {
-        return stream_;
-    }
+PendingCsv::~PendingCsv() {
+    cleanup();
+}
 
-    void close() {
-        stream_.flush();
-        check_output(stream_);
-        stream_.close();
-        check_output(stream_);
-    }
+std::ostream& PendingCsv::stream() {
+    return stream_;
+}
 
-    void publish() {
-        if (std::filesystem::exists(destination_)) {
-            if (!std::filesystem::is_regular_file(destination_)) {
-                throw std::runtime_error("CSV destination is not a file: " + destination_.string());
-            }
-            // Windows rename cannot replace an existing file. Keep its old bytes
-            // until every requested CSV has been published successfully.
-            std::filesystem::rename(destination_, backup_);
-            backed_up_ = true;
+void PendingCsv::close() {
+    stream_.flush();
+    check_output(stream_);
+    stream_.close();
+    check_output(stream_);
+}
+
+void PendingCsv::publish() {
+    if (std::filesystem::exists(destination_)) {
+        if (!std::filesystem::is_regular_file(destination_)) {
+            throw std::runtime_error("CSV destination is not a file: " + destination_.string());
         }
-        std::filesystem::rename(temporary_, destination_);
-        published_ = true;
+        // Windows rename cannot replace an existing file. Keep its old bytes
+        // until every requested CSV has been published successfully.
+        std::filesystem::rename(destination_, backup_);
+        backed_up_ = true;
     }
+    std::filesystem::rename(temporary_, destination_);
+    published_ = true;
+}
 
-    void commit() {
-        committed_ = true;
-        std::error_code ignored;
+void PendingCsv::commit() {
+    committed_ = true;
+    std::error_code ignored;
+    if (backed_up_) {
+        std::filesystem::remove(backup_, ignored);
+    }
+}
+
+void PendingCsv::cleanup() noexcept {
+    stream_.close();
+    std::error_code ignored;
+    if (!committed_) {
+        if (published_) {
+            std::filesystem::remove(destination_, ignored);
+        }
         if (backed_up_) {
-            std::filesystem::remove(backup_, ignored);
+            std::filesystem::rename(backup_, destination_, ignored);
         }
     }
-
-  private:
-    void cleanup() noexcept {
-        stream_.close();
-        std::error_code ignored;
-        if (!committed_) {
-            if (published_) {
-                std::filesystem::remove(destination_, ignored);
-            }
-            if (backed_up_) {
-                std::filesystem::rename(backup_, destination_, ignored);
-            }
-        }
-        if (!temporary_.empty()) {
-            std::filesystem::remove(temporary_, ignored);
-        }
+    if (!temporary_.empty()) {
+        std::filesystem::remove(temporary_, ignored);
     }
+}
 
-    std::filesystem::path destination_, temporary_, backup_;
-    std::ofstream stream_;
-    bool backed_up_ = false;
-    bool published_ = false;
-    bool committed_ = false;
-};
-
-} // namespace
-
-IqDiagnostics::IqDiagnostics(std::uint64_t sample_rate, std::ostream* power, std::ostream* spectrum)
-    : sample_rate_(sample_rate), power_(power), spectrum_(spectrum) {
-    if (sample_rate == 0) {
+void IqDiagnostics::initialize_() {
+    if (sample_rate_ == 0) {
         throw std::invalid_argument("Sample rate must be positive");
     }
     for (auto* output : {power_, spectrum_}) {
@@ -147,7 +132,26 @@ IqDiagnostics::IqDiagnostics(std::uint64_t sample_rate, std::ostream* power, std
     }
 }
 
-void IqDiagnostics::emit_power() {
+IqDiagnostics::IqDiagnostics(std::uint64_t sample_rate, std::ostream* power, std::ostream* spectrum)
+    : sample_rate_(sample_rate), power_(power), spectrum_(spectrum) {
+    initialize_();
+}
+
+void IqDiagnostics::print_iq_summary() {
+    std::cout << "Complex samples: " << num_complex_samples_ << std::endl;
+    std::cout << "Duration: " << std::fixed << std::setprecision(3) << duration_seconds_ << " s\n";
+    if (!std::cout) {
+        throw std::runtime_error("Error writing IQ summary");
+    }
+}
+
+void IqDiagnostics::set_summary_info(const std::uint64_t num_complex_samples,
+                                     const double duration_seconds) {
+    num_complex_samples_ = num_complex_samples;
+    duration_seconds_ = duration_seconds;
+}
+
+void IqDiagnostics::emit_power_() {
     *power_ << static_cast<double>(sample_index_ - power_count_) / static_cast<double>(sample_rate_)
             << ',' << power_sum_ / static_cast<double>(power_count_) << ',' << power_count_ << '\n';
     check_output(*power_);
@@ -163,7 +167,7 @@ void IqDiagnostics::consume(std::span<const std::complex<float>> samples) {
             const double q = sample.imag();
             power_sum_ += i * i + q * q;
             if (++power_count_ == power_window_size) {
-                emit_power();
+                emit_power_();
             }
         }
         if (spectrum_ && spectrum_count_ < spectrum_size) {
@@ -178,7 +182,7 @@ void IqDiagnostics::finish() {
                                  std::to_string(spectrum_count_));
     }
     if (power_ && power_count_ != 0) {
-        emit_power();
+        emit_power_();
     }
     if (spectrum_) {
         // Provisional rectangular-window direct DFT, NOT the Phase 5 production FFT.
@@ -203,51 +207,23 @@ void IqDiagnostics::finish() {
     }
 }
 
-IqSummary export_iq_diagnostics(const std::filesystem::path& input, std::uint64_t sample_rate,
-                                std::ostream& summary,
-                                const std::optional<std::filesystem::path>& power_path,
-                                const std::optional<std::filesystem::path>& spectrum_path,
-                                std::size_t block_capacity) {
-    for (const auto& path : {power_path, spectrum_path}) {
-        if (path && std::filesystem::exists(input) && std::filesystem::exists(*path) &&
-            std::filesystem::equivalent(input, *path)) {
-            throw std::invalid_argument("CSV destination cannot be the IQ input file");
-        }
-    }
-    if (power_path && spectrum_path &&
-        (std::filesystem::absolute(*power_path).lexically_normal() ==
-             std::filesystem::absolute(*spectrum_path).lexically_normal() ||
-         (std::filesystem::exists(*power_path) && std::filesystem::exists(*spectrum_path) &&
-          std::filesystem::equivalent(*power_path, *spectrum_path)))) {
-        throw std::invalid_argument("Power and spectrum CSV destinations must differ");
-    }
-    std::unique_ptr<PendingCsv> power, spectrum;
-    if (power_path) {
-        power = std::make_unique<PendingCsv>(*power_path);
-    }
-    if (spectrum_path) {
-        spectrum = std::make_unique<PendingCsv>(*spectrum_path);
-    }
-    IqDiagnostics diagnostics(sample_rate, power ? &power->stream() : nullptr,
-                              spectrum ? &spectrum->stream() : nullptr);
-    const auto result =
-        summarize_iq_file(input, sample_rate, summary, &diagnostics, block_capacity);
-    for (auto* csv : {power.get(), spectrum.get()}) {
+void IqDiagnostics::export_iq_diagnostics(PendingCsv* power_csv, PendingCsv* spectrum_csv) {
+
+    for (auto csv : {power_csv, spectrum_csv}) {
         if (csv) {
             csv->close();
         }
     }
-    for (auto* csv : {power.get(), spectrum.get()}) {
+    for (auto* csv : {power_csv, spectrum_csv}) {
         if (csv) {
             csv->publish();
         }
     }
-    for (auto* csv : {power.get(), spectrum.get()}) {
+    for (auto* csv : {power_csv, spectrum_csv}) {
         if (csv) {
             csv->commit();
         }
     }
-    return result;
 }
 
 } // namespace dab

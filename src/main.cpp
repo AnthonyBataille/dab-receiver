@@ -1,10 +1,16 @@
-#include "iq_summary.hpp"
+#include "iq_file_reader.hpp"
 #include "iq_diagnostics.hpp"
+#include "offline_iq_runner.hpp"
 
 #include <charconv>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <iostream>
+#include <initializer_list>
+#include <memory>
+#include <optional>
+#include <stdexcept>
 #include <string_view>
 
 namespace {
@@ -56,14 +62,42 @@ int main(int argc, char* argv[]) {
             }
             *destination = argv[index + 1];
         }
+        const std::filesystem::path input_path(argv[1]);
         std::cout << "Input: " << argv[1] << '\n'
                   << "Format: raw unsigned 8-bit interleaved I/Q (one complex sample per pair)\n"
                   << "Sample rate: " << sample_rate << " complex samples/s\n";
-        if (power_path || spectrum_path) {
-            dab::export_iq_diagnostics(argv[1], sample_rate, std::cout, power_path, spectrum_path);
-        } else {
-            dab::summarize_iq_file(argv[1], sample_rate, std::cout);
+
+        dab::IqFileReader reader(input_path);
+        std::unique_ptr<dab::PendingCsv> power_csv, spectrum_csv;
+
+        if (power_path) {
+            power_csv = std::make_unique<dab::PendingCsv>(*power_path);
         }
+        if (spectrum_path) {
+            spectrum_csv = std::make_unique<dab::PendingCsv>(*spectrum_path);
+        }
+        for (const auto& path : {power_path, spectrum_path}) {
+            if (path && std::filesystem::exists(input_path) && std::filesystem::exists(*path) &&
+                std::filesystem::equivalent(input_path, *path)) {
+                throw std::invalid_argument("CSV destination cannot be the IQ input file");
+            }
+        }
+        if (power_path && spectrum_path &&
+            (std::filesystem::absolute(*power_path).lexically_normal() ==
+                 std::filesystem::absolute(*spectrum_path).lexically_normal() ||
+             (std::filesystem::exists(*power_path) && std::filesystem::exists(*spectrum_path) &&
+              std::filesystem::equivalent(*power_path, *spectrum_path)))) {
+            throw std::invalid_argument("Power and spectrum CSV destinations must differ");
+        }
+        dab::IqDiagnostics diagnostics(sample_rate, power_csv ? &power_csv->stream() : nullptr,
+                                       spectrum_csv ? &spectrum_csv->stream() : nullptr);
+        diagnostics.set_summary_info(0, 0.0);
+        dab::build_diagnostics(reader, sample_rate, &diagnostics);
+        if (power_csv || spectrum_csv) {
+
+            diagnostics.export_iq_diagnostics(power_csv.get(), spectrum_csv.get());
+        }
+        diagnostics.print_iq_summary();
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "Error: " << error.what() << '\n';
