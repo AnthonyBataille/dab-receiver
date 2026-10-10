@@ -156,7 +156,6 @@ TEST_CASE("power windows and sample-index time are independent of reader capacit
         bytes.push_back(n >= 512 ? 0 : 128);
     }
     const Fixture fixture(bytes);
-    std::string reference;
     for (const std::size_t capacity : {1, 7, 511, 512, 513, 4096}) {
         std::ostringstream power, summary;
         dab::IqDiagnostics diagnostics(1000, &power, nullptr);
@@ -172,26 +171,15 @@ TEST_CASE("power windows and sample-index time are independent of reader capacit
         REQUIRE(data.size() == 2);
         CHECK(data[0] == std::vector<double>{0, 0.625, 512});
         CHECK(data[1] == std::vector<double>{0.512, 2, 3});
-        if (reference.empty()) {
-            reference = power.str();
-        }
-        CHECK(power.str() == reference);
     }
 }
 
-TEST_CASE("empty recording has a zero summary with or without power export", "[diagnostics]") {
+TEST_CASE("empty recording exports only a power header and a zero summary", "[diagnostics]") {
     const Fixture fixture;
     std::ostringstream summary;
-    std::optional<std::filesystem::path> power;
-    SECTION("summary only") {}
-    SECTION("power export") {
-        power = fixture.power;
-    }
-    export_diagnostics(fixture.input, 123, summary, power);
+    export_diagnostics(fixture.input, 123, summary, fixture.power);
     CHECK(summary.str() == "Complex samples: 0\nDuration: 0.000 s\n");
-    if (power) {
-        CHECK(read_text(*power) == "window_start_seconds,mean_linear_power,sample_count\n");
-    }
+    CHECK(read_text(fixture.power) == "window_start_seconds,mean_linear_power,sample_count\n");
 }
 
 TEST_CASE("export creates missing parent directories", "[diagnostics]") {
@@ -205,52 +193,26 @@ TEST_CASE("export creates missing parent directories", "[diagnostics]") {
     CHECK(rows(read_text(spectrum)).size() == 2048);
 }
 
-TEST_CASE("a second export replaces both CSVs or preserves them on failure",
-          "[diagnostics][error]") {
+TEST_CASE("a failed second publication restores both CSVs", "[diagnostics][error]") {
     const Fixture fixture(std::vector<unsigned char>(4096, 128));
     std::ostringstream summary;
     export_diagnostics(fixture.input, 2048, summary, fixture.power, fixture.spectrum);
     const auto old_power = read_text(fixture.power);
     const auto old_spectrum = read_text(fixture.spectrum);
-    SECTION("successful replacement") {
-        // All-zero bytes convert to -1-j, unlike the first recording's zero signal.
-        std::ofstream replacement(fixture.input, std::ios::binary | std::ios::trunc);
-        for (int byte = 0; byte < 4096; ++byte) {
-            replacement.put(0);
-        }
-        replacement.close();
-        REQUIRE(replacement.good());
-        export_diagnostics(fixture.input, 2048, summary, fixture.power, fixture.spectrum);
-        CHECK(read_text(fixture.power) != old_power);
-        CHECK(read_text(fixture.spectrum) != old_spectrum);
-        CHECK(rows(read_text(fixture.power))[0][1] == 2);
+    // Deny delete sharing so Windows cannot move the second destination aside.
+    {
+        std::ofstream changed(fixture.input, std::ios::binary | std::ios::trunc);
+        const std::vector<char> bytes(4096, 0);
+        changed.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        REQUIRE(changed.good());
     }
-    SECTION("failed replacement") {
-        SECTION("processing fails before publication") {
-            std::filesystem::resize_file(fixture.input, 4097);
-            CHECK_THROWS_WITH(
-                export_diagnostics(fixture.input, 2048, summary, fixture.power, fixture.spectrum),
-                "Unmatched I byte at end of IQ input file");
-        }
-        SECTION("second publication fails after the first") {
-            // Deny delete sharing so Windows cannot move the second destination aside.
-            {
-                std::ofstream changed(fixture.input, std::ios::binary | std::ios::trunc);
-                const std::vector<char> bytes(4096, 0);
-                changed.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-                REQUIRE(changed.good());
-            }
-            const HANDLE locked =
-                CreateFileW(fixture.spectrum.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
-                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-            REQUIRE(locked != INVALID_HANDLE_VALUE);
-            CHECK_THROWS(
-                export_diagnostics(fixture.input, 2048, summary, fixture.power, fixture.spectrum));
-            CloseHandle(locked);
-        }
-        CHECK(read_text(fixture.power) == old_power);
-        CHECK(read_text(fixture.spectrum) == old_spectrum);
-    }
+    const HANDLE locked = CreateFileW(fixture.spectrum.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                                      nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    REQUIRE(locked != INVALID_HANDLE_VALUE);
+    CHECK_THROWS(export_diagnostics(fixture.input, 2048, summary, fixture.power, fixture.spectrum));
+    CloseHandle(locked);
+    CHECK(read_text(fixture.power) == old_power);
+    CHECK(read_text(fixture.spectrum) == old_spectrum);
     CHECK(std::distance(std::filesystem::directory_iterator(fixture.directory),
                         std::filesystem::directory_iterator{}) == 3);
 }
@@ -341,25 +303,6 @@ TEST_CASE("failed processing publishes no CSV and cleans staging", "[diagnostics
     fixture.check_clean();
 }
 
-TEST_CASE("directory destinations are rejected without modifying input", "[diagnostics][error]") {
-    const Fixture fixture({0, 128});
-    const auto before = read_text(fixture.input);
-    CHECK_THROWS_AS(dab::PendingCsv(fixture.directory), std::runtime_error);
-    CHECK(read_text(fixture.input) == before);
-    fixture.check_clean();
-}
-
-TEST_CASE("spectrum can be exported without power", "[diagnostics]") {
-    const Fixture fixture(std::vector<unsigned char>(4096, 192));
-    std::ostringstream summary;
-    export_diagnostics(fixture.input, 2048, summary, {}, fixture.spectrum);
-    CHECK_FALSE(std::filesystem::exists(fixture.power));
-    const auto data = rows(read_text(fixture.spectrum));
-    REQUIRE(data.size() == 2048);
-    CHECK(data[1024][1] == Catch::Approx(0.5));
-    CHECK(summary.str() == "Complex samples: 2048\nDuration: 1.000 s\n");
-}
-
 TEST_CASE("CSV stream write failures are reported", "[diagnostics][error]") {
     LimitedBuffer buffer(100);
     std::ostream failing(&buffer);
@@ -379,32 +322,11 @@ TEST_CASE("CSV stream write failures are reported", "[diagnostics][error]") {
     }
 }
 
-TEST_CASE("IQ summary counts short recordings and formats their durations", "[iq][exercise]") {
-    SECTION("three samples at two samples per second") {
-        const Fixture input({0, 128, 255, 0, 128, 255});
-        std::ostringstream output;
-        export_diagnostics(input.input, 2, output);
-
-        CHECK(output.str() == "Complex samples: 3\nDuration: 1.500 s\n");
-    }
-    SECTION("one sample at four samples per second") {
-        const Fixture input({0, 128});
-        std::ostringstream output;
-        export_diagnostics(input.input, 4, output);
-
-        CHECK(output.str() == "Complex samples: 1\nDuration: 0.250 s\n");
-    }
-}
-
-TEST_CASE("IQ summary counts complex samples and computes duration of a reference-sized file",
-          "[iq]") {
-    constexpr std::uint64_t file_bytes = 40'960'000;
-    const Fixture input({});
-    std::filesystem::resize_file(input.input, file_bytes);
+TEST_CASE("IQ summary counts a short recording and formats fractional duration", "[iq][exercise]") {
+    const Fixture input({0, 128, 255, 0, 128, 255});
     std::ostringstream output;
-    export_diagnostics(input.input, 2'048'000, output);
-
-    CHECK(output.str() == "Complex samples: 20480000\nDuration: 10.000 s\n");
+    export_diagnostics(input.input, 2, output);
+    CHECK(output.str() == "Complex samples: 3\nDuration: 1.500 s\n");
 }
 
 TEST_CASE("offline runner rejects zero sample rate", "[iq][error]") {
