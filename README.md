@@ -8,6 +8,7 @@ The intended high-level receiver chain is:
 
 - [Project scope](docs/project-scope.md)
 - [Development environment](docs/development-environment.md)
+- [Architecture](docs/architecture.md)
 
 Large IQ recordings are not stored in Git.
 
