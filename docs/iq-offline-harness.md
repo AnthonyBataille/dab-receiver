@@ -63,3 +63,17 @@ runs replace existing CSVs after the full input and outputs have been checked.
 On ordinary failure, previous CSVs are restored. An abrupt crash or external
 file interference can leave temporary or backup files, so use the exit status
 to determine success and avoid concurrent access to the destinations.
+
+## Ownership and output boundaries
+
+`run_offline_iq` owns the synchronous file-reading loop and returns an
+`IqSummary` (complex sample count and duration in seconds). Its borrowed
+`IqDiagnostics` pointer is optional; summary-only processing needs no diagnostic
+consumer. `IqDiagnostics` owns streaming power/spectrum history and writes to
+borrowed CSV streams. It does not print summaries or publish files.
+
+The application output module (`iq_output`) formats summaries and owns CSV
+staging/publication through `PendingCsv` and `publish_iq_diagnostics`. The CLI
+coordinates processing, publication, and console output. All requested CSVs
+are closed before publication and committed only after every publication
+succeeds, preserving rollback on ordinary failure.

@@ -1,6 +1,7 @@
 #include "iq_file_reader.hpp"
 #include "iq_diagnostics.hpp"
 #include "offline_iq_runner.hpp"
+#include "iq_output.hpp"
 
 #include <charconv>
 #include <cstdint>
@@ -89,15 +90,17 @@ int main(int argc, char* argv[]) {
               std::filesystem::equivalent(*power_path, *spectrum_path)))) {
             throw std::invalid_argument("Power and spectrum CSV destinations must differ");
         }
-        dab::IqDiagnostics diagnostics(sample_rate, power_csv ? &power_csv->stream() : nullptr,
-                                       spectrum_csv ? &spectrum_csv->stream() : nullptr);
-        diagnostics.set_summary_info(0, 0.0);
-        dab::build_diagnostics(reader, sample_rate, &diagnostics);
+        std::optional<dab::IqDiagnostics> diagnostics;
         if (power_csv || spectrum_csv) {
-
-            diagnostics.export_iq_diagnostics(power_csv.get(), spectrum_csv.get());
+            diagnostics.emplace(sample_rate, power_csv ? &power_csv->stream() : nullptr,
+                                spectrum_csv ? &spectrum_csv->stream() : nullptr);
         }
-        diagnostics.print_iq_summary();
+        const auto summary =
+            dab::run_offline_iq(reader, sample_rate, diagnostics ? &*diagnostics : nullptr);
+        if (power_csv || spectrum_csv) {
+            dab::publish_iq_diagnostics(power_csv.get(), spectrum_csv.get());
+        }
+        dab::print_iq_summary(std::cout, summary);
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "Error: " << error.what() << '\n';

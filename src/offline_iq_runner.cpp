@@ -7,8 +7,8 @@
 
 namespace dab {
 
-void build_diagnostics(IqFileReader& reader, std::uint64_t sample_rate,
-                       IqDiagnostics* diagnostics) {
+IqSummary run_offline_iq(IqFileReader& reader, std::uint64_t sample_rate,
+                         IqDiagnostics* diagnostics) {
     if (sample_rate == 0) {
         throw std::invalid_argument("Sample rate must be positive");
     }
@@ -19,12 +19,16 @@ void build_diagnostics(IqFileReader& reader, std::uint64_t sample_rate,
             break;
         }
         count_complex_samples += complex_samples.size();
-        diagnostics->consume(complex_samples);
+        if (diagnostics) {
+            diagnostics->consume(complex_samples);
+        }
     }
     const double duration_seconds =
         static_cast<double>(count_complex_samples) / static_cast<double>(sample_rate);
-    diagnostics->set_summary_info(count_complex_samples, duration_seconds);
-    diagnostics->finish();
+    if (diagnostics) {
+        diagnostics->finish();
+    }
+    return {count_complex_samples, duration_seconds};
 }
 
 } // namespace dab
