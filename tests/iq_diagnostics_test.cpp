@@ -1,6 +1,7 @@
 #include "iq_diagnostics.hpp"
 #include "iq_file_reader.hpp"
 #include "offline_iq_runner.hpp"
+#include "iq_output.hpp"
 
 #define NOMINMAX
 #include <Windows.h>
@@ -32,28 +33,6 @@
 
 namespace {
 
-// The summary API writes to cout. Restore its buffer, state and formatting even on failure.
-class CoutCapture {
-  public:
-    explicit CoutCapture(std::ostream& output)
-        : flags_(std::cout.flags()), precision_(std::cout.precision()), state_(std::cout.rdstate()),
-          buffer_(std::cout.rdbuf(output.rdbuf())) {}
-    ~CoutCapture() {
-        std::cout.rdbuf(buffer_);
-        std::cout.flags(flags_);
-        std::cout.precision(precision_);
-        std::cout.clear(state_);
-    }
-    CoutCapture(const CoutCapture&) = delete;
-    CoutCapture& operator=(const CoutCapture&) = delete;
-
-  private:
-    std::ios::fmtflags flags_;
-    std::streamsize precision_;
-    std::ios::iostate state_;
-    std::streambuf* buffer_;
-};
-
 // Assemble the public API without reproducing CLI validation or DSP calculations.
 void export_diagnostics(const std::filesystem::path& input, std::uint64_t sample_rate,
                         std::ostream& summary,
@@ -70,10 +49,9 @@ void export_diagnostics(const std::filesystem::path& input, std::uint64_t sample
     }
     dab::IqDiagnostics diagnostics(sample_rate, power ? &power->stream() : nullptr,
                                    spectrum ? &spectrum->stream() : nullptr);
-    dab::build_diagnostics(reader, sample_rate, &diagnostics);
-    diagnostics.export_iq_diagnostics(power.get(), spectrum.get());
-    CoutCapture capture(summary);
-    diagnostics.print_iq_summary();
+    const auto result = dab::run_offline_iq(reader, sample_rate, &diagnostics);
+    dab::publish_iq_diagnostics(power.get(), spectrum.get());
+    dab::print_iq_summary(summary, result);
 }
 
 struct Fixture {
@@ -160,11 +138,10 @@ TEST_CASE("power windows and sample-index time are independent of reader capacit
         std::ostringstream power, summary;
         dab::IqDiagnostics diagnostics(1000, &power, nullptr);
         dab::IqFileReader reader(fixture.input, capacity);
-        dab::build_diagnostics(reader, 1000, &diagnostics);
-        {
-            CoutCapture capture(summary);
-            diagnostics.print_iq_summary();
-        }
+        const auto result = dab::run_offline_iq(reader, 1000, &diagnostics);
+        CHECK(result.num_complex_samples == 515);
+        CHECK(result.duration_seconds == Catch::Approx(0.515));
+        dab::print_iq_summary(summary, result);
         CHECK(summary.str() == "Complex samples: 515\nDuration: 0.515 s\n");
         CHECK(reader.read_next().empty());
         const auto data = rows(power.str());
@@ -333,15 +310,21 @@ TEST_CASE("offline runner rejects zero sample rate", "[iq][error]") {
     const Fixture input({0, 128});
     dab::IqFileReader reader(input.input);
     dab::IqDiagnostics diagnostics(1000, nullptr, nullptr);
-    CHECK_THROWS_AS(dab::build_diagnostics(reader, 0, &diagnostics), std::invalid_argument);
+    CHECK_THROWS_AS(dab::run_offline_iq(reader, 0, &diagnostics), std::invalid_argument);
     CHECK(reader.read_next().size() == 1);
 }
 
 TEST_CASE("summary output failures are reported", "[iq][error]") {
     std::ostringstream output;
-    CoutCapture capture(output);
-    dab::IqDiagnostics diagnostics(1000, nullptr, nullptr);
-    diagnostics.set_summary_info(3, 0.003);
-    std::cout.setstate(std::ios::badbit);
-    CHECK_THROWS_AS(diagnostics.print_iq_summary(), std::runtime_error);
+    output.setstate(std::ios::badbit);
+    CHECK_THROWS_AS(dab::print_iq_summary(output, {3, 0.003}), std::runtime_error);
+}
+
+TEST_CASE("offline summary does not require diagnostics", "[iq]") {
+    const Fixture input({0, 128, 255, 0, 128, 255});
+    dab::IqFileReader reader(input.input, 1);
+    const auto summary = dab::run_offline_iq(reader, 2);
+    CHECK(summary.num_complex_samples == 3);
+    CHECK(summary.duration_seconds == 1.5);
+    CHECK(reader.read_next().empty());
 }
