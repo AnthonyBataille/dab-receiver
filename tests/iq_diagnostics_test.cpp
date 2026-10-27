@@ -320,6 +320,18 @@ TEST_CASE("summary output failures are reported", "[iq][error]") {
     CHECK_THROWS_AS(dab::print_iq_summary(output, {3, 0.003}), std::runtime_error);
 }
 
+TEST_CASE("IQ summary prints candidate indices durations and start spacing", "[iq]") {
+    const dab::IqSummary summary{
+        4295167000, 2097.249, {{4294967296, 4294969952}, {4295163904, 4295166554}}};
+    std::ostringstream output;
+    dab::print_iq_summary(output, summary);
+    CHECK(output.str() == "Complex samples: 4295167000\nDuration: 2097.249 s\n"
+                          "Null symbol candidates: 2\n"
+                          "start_sample,end_sample,duration_samples,spacing_samples\n"
+                          "4294967296,4294969952,2656,\n"
+                          "4295163904,4295166554,2650,196608\n");
+}
+
 TEST_CASE("offline summary does not require diagnostics", "[iq]") {
     const Fixture input({0, 128, 255, 0, 128, 255});
     dab::IqFileReader reader(input.input, 1);
