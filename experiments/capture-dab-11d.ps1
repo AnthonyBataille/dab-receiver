@@ -15,7 +15,8 @@ if (Test-Path -LiteralPath $OutputFile) {
     throw "Output already exists: $OutputFile"
 }
 
-& $RtlSdrExe -f 222064000 -s 2048000 -n $sampleCount $OutputFile
+# Gain is set to 19.7 dB. It provides unsaturated I/Q signal, as observed experimentally.
+& $RtlSdrExe -f 222064000 -s 2048000 -g 19.7 -n $sampleCount $OutputFile
 if ($LASTEXITCODE -ne 0) {
     throw "rtl_sdr.exe failed with exit code $LASTEXITCODE"
 }

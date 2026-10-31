@@ -130,6 +130,20 @@ void print_iq_summary(std::ostream& output, const IqSummary& summary) {
     output << "Complex samples: " << summary.num_complex_samples << '\n'
            << "Duration: " << std::fixed << std::setprecision(3) << summary.duration_seconds
            << " s\n";
+    if (!summary.null_symbols.empty()) {
+        output << "Null symbol candidates: " << summary.null_symbols.size() << '\n'
+               << "start_sample,end_sample,duration_samples,spacing_samples\n";
+        std::optional<std::uint64_t> previous_start;
+        for (const auto& interval : summary.null_symbols) {
+            output << interval.start << ',' << interval.end << ',' << interval.end - interval.start
+                   << ',';
+            if (previous_start) {
+                output << interval.start - *previous_start;
+            }
+            output << '\n';
+            previous_start = interval.start;
+        }
+    }
     if (!output) {
         throw std::runtime_error("Error writing IQ summary");
     }
