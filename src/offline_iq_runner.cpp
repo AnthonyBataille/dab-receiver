@@ -4,6 +4,8 @@
 #include "iq_diagnostics.hpp"
 #include "null_symbol_detector.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <stdexcept>
 
 namespace dab {
@@ -14,6 +16,17 @@ IqSummary run_offline_iq(IqFileReader& reader, std::uint64_t sample_rate,
         throw std::invalid_argument("Sample rate must be positive");
     }
     NullSymbolDetectorParams params{};
+    if (sample_rate != 2'048'000) {
+        double const sample_rate_scale = static_cast<double>(sample_rate) / 2'048'000.0;
+        params.window_length =
+            std::max<size_t>(static_cast<size_t>(std::round(128.0 * sample_rate_scale)), 1);
+        params.min_candidate_duration =
+            std::max<uint64_t>(static_cast<uint64_t>(std::round(2390 * sample_rate_scale)), 1);
+        params.max_candidate_duration =
+            std::max<uint64_t>(static_cast<uint64_t>(std::round(2922 * sample_rate_scale)),
+                               params.min_candidate_duration);
+        params.reference_power_update_rate = 1.0 - std::pow(1.0 - 0.0001, 1.0 / sample_rate_scale);
+    }
     NullSymbolDetector null_detector(params);
     IqSummary summary{};
 
