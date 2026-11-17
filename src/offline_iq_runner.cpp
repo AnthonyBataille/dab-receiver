@@ -3,6 +3,7 @@
 #include "iq_file_reader.hpp"
 #include "iq_diagnostics.hpp"
 #include "null_symbol_detector.hpp"
+#include "frame_periodicity_validator.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -16,6 +17,7 @@ IqSummary run_offline_iq(IqFileReader& reader, std::uint64_t sample_rate,
         throw std::invalid_argument("Sample rate must be positive");
     }
     NullSymbolDetectorParams params{};
+    FramePeriodicityValidatorParams period_params{};
     if (sample_rate != 2'048'000) {
         double const sample_rate_scale = static_cast<double>(sample_rate) / 2'048'000.0;
         params.window_length =
@@ -26,8 +28,18 @@ IqSummary run_offline_iq(IqFileReader& reader, std::uint64_t sample_rate,
             std::max<uint64_t>(static_cast<uint64_t>(std::round(2922 * sample_rate_scale)),
                                params.min_candidate_duration);
         params.reference_power_update_rate = 1.0 - std::pow(1.0 - 0.0001, 1.0 / sample_rate_scale);
+        // Round scaled sample counts; keep valid bounds even at very low rates.
+        period_params.expected_frame_period = std::max<std::uint64_t>(
+            static_cast<std::uint64_t>(std::round(
+                static_cast<double>(period_params.expected_frame_period) * sample_rate_scale)),
+            1);
+        period_params.spacing_tolerance = std::min<std::uint64_t>(
+            static_cast<std::uint64_t>(std::round(
+                static_cast<double>(period_params.spacing_tolerance) * sample_rate_scale)),
+            period_params.expected_frame_period - 1);
     }
     NullSymbolDetector null_detector(params);
+    FramePeriodicityValidator period_validator(period_params);
     IqSummary summary{};
 
     for (;;) {
@@ -44,6 +56,9 @@ IqSummary run_offline_iq(IqFileReader& reader, std::uint64_t sample_rate,
             std::optional<NullSymbolInterval> interval = null_detector.update_candidate_state();
             if (interval) {
                 summary.null_symbols.push_back(interval.value());
+                const FramePeriodicityResult period_result =
+                    period_validator.consume(interval.value());
+                summary.period_results.push_back(period_result);
             }
             null_detector.update_reference_power();
         }
