@@ -339,4 +339,57 @@ TEST_CASE("offline summary does not require diagnostics", "[iq]") {
     CHECK(summary.num_complex_samples == 3);
     CHECK(summary.duration_seconds == 1.5);
     CHECK(reader.read_next().empty());
+    CHECK(summary.period_results.empty());
+}
+
+TEST_CASE("offline runner validates null spacing across blocks at the input sample rate",
+          "[iq][frame-periodicity-validator]") {
+    // Hand-defined Mode I timing at two rates: 96 ms frames, 1.296875 ms nulls.
+    // Six nulls provide the five spacings required for acquisition.
+    for (const std::uint64_t sample_rate : {2'048'000ULL, 256'000ULL}) {
+        const std::size_t period = sample_rate == 2'048'000 ? 196608 : 24576;
+        const std::size_t null_length = sample_rate == 2'048'000 ? 2656 : 332;
+        const std::size_t first_null = 1024;
+        std::vector<unsigned char> bytes(2 * (first_null + 5 * period + null_length + 1024), 128);
+        for (std::size_t sample = 0; sample < bytes.size() / 2; ++sample) {
+            bytes[2 * sample] = 192;
+        }
+        for (std::size_t frame = 0; frame < 6; ++frame) {
+            const auto start = first_null + frame * period;
+            for (std::size_t sample = start; sample < start + null_length; ++sample) {
+                bytes[2 * sample] = 128;
+            }
+        }
+        const Fixture fixture(bytes);
+        // One sample per read and larger blocks must produce identical results.
+        std::vector<dab::FramePeriodicityResult> baseline;
+        for (const std::size_t capacity : {std::size_t{1}, std::size_t{4096}}) {
+            dab::IqFileReader reader(fixture.input, capacity);
+            const auto summary = dab::run_offline_iq(reader, sample_rate);
+            REQUIRE(summary.null_symbols.size() == 6);
+            REQUIRE(summary.period_results.size() == 6);
+            for (std::size_t i = 0; i < summary.period_results.size(); ++i) {
+                const auto& result = summary.period_results[i];
+                CHECK(result.candidate.start == summary.null_symbols[i].start);
+                CHECK(result.candidate.end == summary.null_symbols[i].end);
+                CHECK(result.consecutive_matches == i);
+                if (i == 0) {
+                    CHECK_FALSE(result.spacing_samples);
+                    CHECK(result.spacing_status == dab::FrameSpacingStatus::FIRST_CANDIDATE);
+                } else {
+                    CHECK(result.spacing_samples == period);
+                    CHECK(result.spacing_status == dab::FrameSpacingStatus::MATCH);
+                }
+                CHECK(result.state ==
+                      (i == 5 ? dab::ValidatorState::TRACKING : dab::ValidatorState::CONFIRMING));
+                if (!baseline.empty()) {
+                    CHECK(result.candidate.start == baseline[i].candidate.start);
+                    CHECK(result.candidate.end == baseline[i].candidate.end);
+                    CHECK(result.spacing_samples == baseline[i].spacing_samples);
+                    CHECK(result.state == baseline[i].state);
+                }
+            }
+            baseline = summary.period_results;
+        }
+    }
 }

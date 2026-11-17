@@ -54,6 +54,13 @@ if(BUILD_TESTING)
     )
     FetchContent_MakeAvailable(Catch2)
 
+    add_executable(dab_frame_periodicity_validator_test tests/frame_periodicity_validator_test.cpp)
+    target_link_libraries(dab_frame_periodicity_validator_test PRIVATE dab_frame_periodicity_validator Catch2::Catch2WithMain)
+    if(MSVC)
+        target_compile_options(dab_frame_periodicity_validator_test PRIVATE /W4 /WX /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME frame_periodicity_validator_test COMMAND dab_frame_periodicity_validator_test)
+
     add_executable(dab_null_symbol_detector_test tests/null_symbol_detector_test.cpp)
     target_link_libraries(dab_null_symbol_detector_test PRIVATE dab_null_symbol_detector Catch2::Catch2WithMain)
     if(MSVC)
